@@ -24,6 +24,7 @@
 using System;
 using System.Threading.Tasks;
 using Akka.Actor;
+using Akkatecture.Aggregates.ExecutionResults;
 using Domain.Model.Account;
 using Domain.Model.Account.Commands;
 using Domain.Model.Account.Entities;
@@ -32,6 +33,8 @@ using Domain.Repositories.Revenue;
 using Domain.Repositories.Revenue.Queries;
 using Domain.Repositories.Revenue.ReadModels;
 using Domain.Sagas.MoneyTransfer;
+using Domain.Sagas.OtherSaga;
+using Domain.Sagas.OtherSaga.Commands;
 using Domain.Subscribers.Revenue;
 
 namespace Application
@@ -41,6 +44,8 @@ namespace Application
         public static IActorRef AccountManager { get; set; }
         public static IActorRef RevenueRepository { get; set; }
 
+        public static IActorRef OtherSagaManager { get; set; }
+        
         public static void CreateActorSystem()
         {
             //Create actor system
@@ -51,16 +56,20 @@ namespace Application
 
             //Create revenue repository
             var revenueRepository = system.ActorOf(Props.Create(() => new RevenueRepository()), "revenue-repository");
-
-            //Create subscriber for revenue repository
+            
+           //Create subscriber for revenue repository
             system.ActorOf(Props.Create(() => new RevenueSubscriber(revenueRepository)), "revenue-subscriber");
 
             //Create saga manager for money transfer
             system.ActorOf(Props.Create(() =>
                 new MoneyTransferSagaManager(() => new MoneyTransferSaga(aggregateManager))), "moneytransfer-saga");
 
-            AccountManager = aggregateManager;
+             //Create saga manager for OtherSaga
+             var otherSagaManager = system.ActorOf(Props.Create(() => new OtherSagaManager(() => new OtherSaga(revenueRepository))), "othersaga-manager");
+ 
+             AccountManager = aggregateManager;
             RevenueRepository = revenueRepository;
+            OtherSagaManager = otherSagaManager;
         }
 
         public static async Task Main(string[] args)
@@ -107,7 +116,13 @@ namespace Application
             //print the results
             Console.WriteLine($"The Revenue is: {revenue.Revenue.Value}.");
             Console.WriteLine($"From: {revenue.Transactions} transaction(s).");
+            var startMessage = new OtherSagaId("asdf");
+            var responseFromOtherSaga = await OtherSagaManager.Ask<IExecutionResult>(new StartOtherSaga(startMessage),TimeSpan.FromMilliseconds(500));
 
+            await Task.Delay(TimeSpan.FromSeconds(1));
+            revenue = RevenueRepository.Ask<RevenueReadModel>(new GetRevenueQuery(), TimeSpan.FromMilliseconds(500)).Result;
+            Console.WriteLine($"The revenue has now changed to {revenue.Revenue.Value} from {revenue.Transactions} transactions.");
+            
             Console.ReadLine();
         }
     }
